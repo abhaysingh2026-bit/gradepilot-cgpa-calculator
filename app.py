@@ -1,363 +1,655 @@
+Python
+
 import streamlit as st
 import pandas as pd
+import numpy as np
+from datetime import datetime
 
 from calculator import calculate_sgpa, calculate_cgpa
 from grading_system import grade_from_percentage
 
 
+# ==========================================
+# PAGE CONFIGURATION
+# ==========================================
+
 st.set_page_config(
-    page_title="ABES Smart CGPA Calculator",
+    page_title="GradePilot | CGPA Calculator",
     page_icon="🎓",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Initialize session storage
-if "semester_records" not in st.session_state:
-    st.session_state.semester_records = []
 
-if "last_subjects" not in st.session_state:
-    st.session_state.last_subjects = []
+# ==========================================
+# PROFESSIONAL CSS DESIGN
+# ==========================================
 
-if "last_roll" not in st.session_state:
-    st.session_state.last_roll = ""
+st.markdown("""
+<style>
+
+.stApp {
+    background: #f5f7fc;
+    color: #172033;
+}
+
+.block-container {
+    max-width: 1200px;
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
+
+h1, h2, h3 {
+    color: #172554;
+    font-weight: 750;
+}
+
+[data-testid="stSidebar"] {
+    background: #eef2ff;
+}
+
+[data-testid="stMetric"] {
+    background: white;
+    border: 1px solid #e2e8f0;
+    padding: 22px;
+    border-radius: 16px;
+    box-shadow: 0 4px 15px rgba(15, 23, 42, 0.05);
+}
+
+[data-testid="stMetricValue"] {
+    color: #2563eb;
+    font-weight: 750;
+}
+
+.stButton > button {
+    background: #2563eb;
+    color: white;
+    border-radius: 10px;
+    border: none;
+    padding: 10px 20px;
+    font-weight: 650;
+}
+
+.stButton > button:hover {
+    background: #1d4ed8;
+    color: white;
+}
+
+.stDownloadButton > button {
+    border-radius: 10px;
+    border: 1px solid #2563eb;
+    color: #2563eb;
+    font-weight: 600;
+}
+
+div[data-testid="stDataFrame"] {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+
+.hero {
+    background: linear-gradient(120deg, #172554, #2563eb);
+    padding: 35px;
+    border-radius: 20px;
+    color: white;
+    margin-bottom: 25px;
+}
+
+.hero h1 {
+    color: white;
+    font-size: 38px;
+}
+
+.hero p {
+    color: #dbeafe;
+    font-size: 16px;
+}
+
+.section-card {
+    background: white;
+    padding: 22px;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 15px;
+}
+
+.small-text {
+    color: #64748b;
+    font-size: 13px;
+}
+
+</style>
+""", unsafe_allow_html=True)
 
 
-# Header
-st.title("🎓 ABES Smart CGPA & SGPA Calculator")
-st.subheader("Student Academic Performance Dashboard")
+# ==========================================
+# SESSION STATE
+# ==========================================
 
-st.write(
-    "Calculate SGPA, CGPA, subject grades "
-    "and monitor your academic performance."
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "student" not in st.session_state:
+    st.session_state.student = {}
+
+
+# ==========================================
+# SIDEBAR NAVIGATION
+# ==========================================
+
+st.sidebar.title("🎓 GradePilot")
+st.sidebar.caption("Your Academic Performance Partner")
+
+page = st.sidebar.radio(
+    "NAVIGATION",
+    [
+        "Dashboard",
+        "SGPA Calculator",
+        "CGPA Calculator",
+        "Semester History",
+        "About"
+    ]
 )
 
-st.info(
-    "This calculator provides educational estimates. "
-    "Verify official ABES/AKTU grading rules."
+st.sidebar.divider()
+
+st.sidebar.info(
+    "Calculate your academic performance "
+    "and track your progress semester by semester."
 )
 
-st.divider()
+
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+
+def get_grade_details(marks, maximum):
+    percentage = (marks / maximum) * 100
+    grade, point = grade_from_percentage(percentage)
+    return percentage, grade, point
 
 
-# Student information
-st.header("1. Student Information")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    roll_no = st.text_input("Roll Number")
-    student_name = st.text_input("Student Name")
-
-with col2:
-    branch = st.text_input("Branch", value="CSE AI-ML")
-    academic_year = st.text_input(
-        "Academic Year", value="2026-27"
-    )
-
-semester = st.selectbox(
-    "Select Semester",
-    list(range(1, 9))
-)
-
-st.divider()
+def create_csv_download(data):
+    df = pd.DataFrame(data)
+    return df.to_csv(index=False).encode("utf-8")
 
 
-# Subject details
-st.header("2. Enter Subject Details")
-
-st.write("Enter marks and credits for each subject.")
-
-default_data = pd.DataFrame([
-    {
-        "subject_code": "",
-        "subject_name": "",
-        "course_type": "theory",
-        "credits": 3.0,
-        "internal_marks": 0.0,
-        "internal_max": 30.0,
-        "external_marks": 0.0,
-        "external_max": 70.0
-    }
-])
-
-subjects_df = st.data_editor(
-    default_data,
-    num_rows="dynamic",
-    use_container_width=True,
-    key="subject_editor"
-)
-
-st.divider()
+def calculate_grade_label(sgpa):
+    if sgpa >= 9:
+        return "Excellent"
+    elif sgpa >= 8:
+        return "Very Good"
+    elif sgpa >= 7:
+        return "Good"
+    elif sgpa >= 6:
+        return "Average"
+    elif sgpa >= 4:
+        return "Pass"
+    return "Needs Improvement"
 
 
-# SGPA calculation
-st.header("3. Calculate SGPA")
+# ==========================================
+# DASHBOARD
+# ==========================================
 
-if st.button("Calculate SGPA", type="primary"):
+if page == "Dashboard":
 
-    try:
-        if not roll_no.strip():
-            raise ValueError("Enter roll number.")
+    st.markdown("""
+    <div class="hero">
+        <h1>Welcome to GradePilot 🚀</h1>
+        <p>Your smart academic performance and CGPA tracking platform.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-        if not student_name.strip():
-            raise ValueError("Enter student name.")
+    st.subheader("Your Academic Overview")
 
-        if not branch.strip() or not academic_year.strip():
-            raise ValueError("Enter branch and academic year.")
+    history = st.session_state.history
 
-        credits = []
-        grade_points = []
-        result_rows = []
+    total_semesters = len(history)
 
-        for _, row in subjects_df.iterrows():
+    if total_semesters > 0:
+        latest_sgpa = history[-1]["SGPA"]
+        overall_cgpa = calculate_cgpa(
+            [item["SGPA"] for item in history],
+            [item["Total Credits"] for item in history]
+        )
+        total_credits = sum(
+            item["Total Credits"] for item in history
+        )
+    else:
+        latest_sgpa = 0
+        overall_cgpa = 0
+        total_credits = 0
 
-            code = str(row["subject_code"]).strip()
-            name = str(row["subject_name"]).strip()
+    col1, col2, col3, col4 = st.columns(4)
 
-            if not code and not name:
-                continue
-
-            if not code or not name:
-                raise ValueError(
-                    "Enter both subject code and subject name."
-                )
-
-            credit = float(row["credits"])
-            internal = float(row["internal_marks"])
-            internal_max = float(row["internal_max"])
-            external = float(row["external_marks"])
-            external_max = float(row["external_max"])
-
-            values = [
-                credit, internal, internal_max,
-                external, external_max
-            ]
-
-            if not all(pd.notna(v) for v in values):
-                raise ValueError("Enter valid numeric values.")
-
-            if credit <= 0:
-                raise ValueError("Credits must be greater than zero.")
-
-            if min(internal, internal_max, external, external_max) < 0:
-                raise ValueError("Marks cannot be negative.")
-
-            if internal > internal_max:
-                raise ValueError(
-                    f"Internal marks exceed maximum for {name}."
-                )
-
-            if external > external_max:
-                raise ValueError(
-                    f"External marks exceed maximum for {name}."
-                )
-
-            maximum = internal_max + external_max
-
-            if maximum <= 0:
-                raise ValueError(
-                    f"Maximum marks must be positive for {name}."
-                )
-
-            total = internal + external
-            percentage = (total / maximum) * 100
-
-            grade, point = grade_from_percentage(percentage)
-
-            credits.append(credit)
-            grade_points.append(point)
-
-            result_rows.append({
-                "roll_no": roll_no.strip(),
-                "student_name": student_name.strip(),
-                "branch": branch.strip(),
-                "academic_year": academic_year.strip(),
-                "semester": semester,
-                "subject_code": code,
-                "subject_name": name,
-                "course_type": row["course_type"],
-                "credits": credit,
-                "internal_marks": internal,
-                "internal_max": internal_max,
-                "external_marks": external,
-                "external_max": external_max,
-                "total_marks": total,
-                "maximum_marks": maximum,
-                "percentage": round(percentage, 2),
-                "grade": grade,
-                "grade_point": point
-            })
-
-        if not result_rows:
-            raise ValueError("Enter at least one subject.")
-
-        sgpa = calculate_sgpa(credits, grade_points)
-
-        total_credits = sum(credits)
-
-        # Update semester record
-        records = [
-            item for item in st.session_state.semester_records
-            if not (
-                item["roll_no"] == roll_no.strip()
-                and item["semester"] == semester
-            )
-        ]
-
-        records.append({
-            "roll_no": roll_no.strip(),
-            "student_name": student_name.strip(),
-            "branch": branch.strip(),
-            "academic_year": academic_year.strip(),
-            "semester": semester,
-            "total_credits": total_credits,
-            "sgpa": sgpa
-        })
-
-        st.session_state.semester_records = records
-        st.session_state.last_subjects = result_rows
-        st.session_state.last_roll = roll_no.strip()
-
-        st.success("SGPA calculated successfully!")
-
-    except (ValueError, TypeError, KeyError) as error:
-        st.error(str(error))
-
-
-# Display semester result
-if (
-    st.session_state.last_subjects
-    and st.session_state.last_roll == roll_no.strip()
-):
+    col1.metric("Overall CGPA", f"{overall_cgpa:.2f}")
+    col2.metric("Latest SGPA", f"{latest_sgpa:.2f}")
+    col3.metric("Semesters", total_semesters)
+    col4.metric("Total Credits", total_credits)
 
     st.divider()
-    st.header("4. Semester Result")
 
-    result_df = pd.DataFrame(
-        st.session_state.last_subjects
-    )
+    st.subheader("Quick Actions")
 
-    current_record = next(
-        (
-            item for item in st.session_state.semester_records
-            if item["roll_no"] == roll_no.strip()
-            and item["semester"] == semester
-        ),
-        None
-    )
+    c1, c2 = st.columns(2)
 
-    if current_record:
+    with c1:
+        st.markdown("### 📘 SGPA Calculator")
+        st.write("Calculate your semester grade point average.")
+        if st.button("Calculate SGPA", use_container_width=True):
+            st.session_state.quick_page = "SGPA Calculator"
+            st.rerun()
 
-        col1, col2, col3 = st.columns(3)
+    with c2:
+        st.markdown("### 📊 CGPA Calculator")
+        st.write("Calculate your cumulative grade point average.")
+        if st.button("Calculate CGPA", use_container_width=True):
+            st.session_state.quick_page = "CGPA Calculator"
+            st.rerun()
 
-        col1.metric(
-            "SGPA",
-            f"{current_record['sgpa']:.2f}/10"
+    if history:
+        st.divider()
+        st.subheader("Your SGPA Progress")
+
+        chart_data = pd.DataFrame({
+            "Semester": [item["Semester"] for item in history],
+            "SGPA": [item["SGPA"] for item in history]
+        })
+
+        st.line_chart(
+            chart_data.set_index("Semester"),
+            y="SGPA"
         )
 
-        col2.metric(
-            "Total Credits",
-            f"{current_record['total_credits']:g}"
+    else:
+        st.info(
+            "You haven't added any semester results yet. "
+            "Start by calculating your first SGPA."
         )
 
-        col3.metric(
-            "Total Subjects",
-            len(result_df)
+
+# ==========================================
+# SGPA CALCULATOR
+# ==========================================
+
+elif page == "SGPA Calculator":
+
+    st.title("📘 SGPA Calculator")
+    st.caption("Calculate your Semester Grade Point Average.")
+
+    with st.form("student_form"):
+
+        st.subheader("Student Information")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            student_name = st.text_input(
+                "Student Name",
+                placeholder="Enter your full name"
+            )
+
+            roll_no = st.text_input(
+                "Roll Number",
+                placeholder="Enter your roll number"
+            )
+
+        with col2:
+            branch = st.selectbox(
+                "Branch",
+                [
+                    "CSE Core",
+                    "CSE AI-ML",
+                    "CSE Data Science",
+                    "IT",
+                    "ECE",
+                    "Other"
+                ]
+            )
+
+            semester = st.selectbox(
+                "Semester",
+                [f"Semester {i}" for i in range(1, 9)]
+            )
+
+        st.divider()
+
+        st.subheader("Subject Details")
+
+        st.write(
+            "Enter each subject's credits and marks. "
+            "You can add more rows in the table."
         )
 
-        st.subheader("Subject-wise Performance")
+        default_subjects = pd.DataFrame({
+            "Subject Name": ["Mathematics", "Physics", "Programming"],
+            "Credits": [4, 3, 3],
+            "Marks Obtained": [80, 75, 85],
+            "Maximum Marks": [100, 100, 100]
+        })
 
-        display_columns = [
-            "subject_code",
-            "subject_name",
-            "credits",
-            "total_marks",
-            "maximum_marks",
-            "percentage",
-            "grade",
-            "grade_point"
-        ]
+        subjects = st.data_editor(
+            default_subjects,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Subject Name": st.column_config.TextColumn(
+                    "Subject Name",
+                    required=True
+                ),
+                "Credits": st.column_config.NumberColumn(
+                    "Credits",
+                    min_value=1,
+                    max_value=10,
+                    step=1
+                ),
+                "Marks Obtained": st.column_config.NumberColumn(
+                    "Marks Obtained",
+                    min_value=0,
+                    step=1
+                ),
+                "Maximum Marks": st.column_config.NumberColumn(
+                    "Maximum Marks",
+                    min_value=1,
+                    step=1
+                )
+            },
+            key="subject_editor"
+        )
+
+        submitted = st.form_submit_button(
+            "Calculate My SGPA 🚀",
+            use_container_width=True
+        )
+
+    if submitted:
+
+        if not student_name.strip() or not roll_no.strip():
+            st.error("Please enter your name and roll number.")
+
+        elif subjects.empty:
+            st.error("Please enter at least one subject.")
+
+        else:
+            valid = True
+            subject_results = []
+
+            for _, row in subjects.iterrows():
+
+                name = str(row["Subject Name"]).strip()
+
+                if not name:
+                    st.error("Subject name cannot be empty.")
+                    valid = False
+                    break
+
+                if pd.isna(row["Credits"]) or pd.isna(row["Marks Obtained"]) or pd.isna(row["Maximum Marks"]):
+                    st.error("Please fill in all subject details.")
+                    valid = False
+                    break
+
+                credits = float(row["Credits"])
+                marks = float(row["Marks Obtained"])
+                maximum = float(row["Maximum Marks"])
+
+                if credits <= 0 or maximum <= 0:
+                    st.error("Credits and maximum marks must be positive.")
+                    valid = False
+                    break
+
+                if marks < 0 or marks > maximum:
+                    st.error(
+                        f"Invalid marks for {name}. "
+                        "Marks must be between 0 and maximum marks."
+                    )
+                    valid = False
+                    break
+
+                percentage, grade, point = get_grade_details(
+                    marks, maximum
+                )
+
+                subject_results.append({
+                    "Subject": name,
+                    "Credits": credits,
+                    "Marks": marks,
+                    "Maximum Marks": maximum,
+                    "Percentage": round(percentage, 2),
+                    "Grade": grade,
+                    "Grade Point": point
+                })
+
+            if valid and subject_results:
+
+                credits_list = [
+                    item["Credits"] for item in subject_results
+                ]
+
+                points_list = [
+                    item["Grade Point"] for item in subject_results
+                ]
+
+                sgpa = calculate_sgpa(
+                    credits_list,
+                    points_list
+                )
+
+                total_credits = sum(credits_list)
+
+                total_marks = sum(
+                    item["Marks"] for item in subject_results
+                )
+
+                maximum_marks = sum(
+                    item["Maximum Marks"] for item in subject_results
+                )
+
+                percentage = (
+                    total_marks / maximum_marks
+                ) * 100
+
+                st.session_state.student = {
+                    "Name": student_name,
+                    "Roll Number": roll_no,
+                    "Branch": branch
+                }
+
+                record = {
+                    "Student Name": student_name,
+                    "Roll Number": roll_no,
+                    "Branch": branch,
+                    "Semester": semester,
+                    "SGPA": round(float(sgpa), 2),
+                    "Total Credits": total_credits,
+                    "Percentage": round(percentage, 2),
+                    "Date": datetime.now().strftime("%d-%m-%Y")
+                }
+
+                st.session_state.history.append(record)
+
+                st.success("Your SGPA has been calculated successfully!")
+
+                st.divider()
+
+                st.subheader("🎉 Your Result")
+
+                r1, r2, r3 = st.columns(3)
+
+                r1.metric("Your SGPA", f"{sgpa:.2f}")
+                r2.metric("Percentage", f"{percentage:.2f}%")
+                r3.metric("Total Credits", total_credits)
+
+                st.markdown(
+                    f"### Performance: {calculate_grade_label(sgpa)}"
+                )
+
+                st.subheader("Subject-wise Result")
+
+                result_df = pd.DataFrame(subject_results)
+
+                st.dataframe(
+                    result_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.download_button(
+                    "⬇️ Download Subject Result CSV",
+                    data=create_csv_download(subject_results),
+                    file_name="gradepilot_subject_result.csv",
+                    mime="text/csv"
+                )
+
+
+# ==========================================
+# CGPA CALCULATOR
+# ==========================================
+
+elif page == "CGPA Calculator":
+
+    st.title("📊 CGPA Calculator")
+    st.caption("Calculate your cumulative grade point average.")
+
+    history = st.session_state.history
+
+    if history:
+
+        st.subheader("Your Semester Records")
+
+        history_df = pd.DataFrame(history)
 
         st.dataframe(
-            result_df[display_columns],
+            history_df,
             use_container_width=True,
             hide_index=True
         )
 
+        sgpas = [item["SGPA"] for item in history]
+        credits = [item["Total Credits"] for item in history]
+
+        cgpa = calculate_cgpa(sgpas, credits)
+
+        total_credits = sum(credits)
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Overall CGPA", f"{cgpa:.2f}")
+        col2.metric("Completed Semesters", len(history))
+        col3.metric("Total Credits", total_credits)
+
+        st.success(
+            f"Your current overall CGPA is {cgpa:.2f}"
+        )
+
         st.download_button(
-            "Download Semester Result CSV",
-            data=result_df.to_csv(index=False).encode("utf-8"),
-            file_name=f"semester_{semester}_result.csv",
+            "⬇️ Download CGPA Report",
+            data=create_csv_download(history),
+            file_name="gradepilot_cgpa_report.csv",
             mime="text/csv"
         )
 
+    else:
+        st.info(
+            "No semester records found. "
+            "Calculate your SGPA first to see your CGPA."
+        )
 
-# Overall CGPA
+
+# ==========================================
+# SEMESTER HISTORY
+# ==========================================
+
+elif page == "Semester History":
+
+    st.title("📚 Semester History")
+    st.caption("Track your academic journey.")
+
+    history = st.session_state.history
+
+    if history:
+
+        df = pd.DataFrame(history)
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.subheader("Semester Performance")
+
+        chart = df[["Semester", "SGPA"]].copy()
+
+        st.bar_chart(
+            chart.set_index("Semester")
+        )
+
+        st.download_button(
+            "⬇️ Export All Records",
+            data=create_csv_download(history),
+            file_name="gradepilot_semester_history.csv",
+            mime="text/csv"
+        )
+
+        if st.button("Clear Session History"):
+            st.session_state.history = []
+            st.rerun()
+
+    else:
+        st.info("Your semester history will appear here.")
+
+
+# ==========================================
+# ABOUT PAGE
+# ==========================================
+
+elif page == "About":
+
+    st.title("About GradePilot 🎓")
+
+    st.markdown("""
+    <div class="section-card">
+
+    <h2>GradePilot</h2>
+
+    <p>
+    GradePilot is a student-focused academic performance
+    calculator designed to make SGPA and CGPA calculations
+    simple, clear and convenient.
+    </p>
+
+    <h3>Key Features</h3>
+
+    <ul>
+        <li>Semester Grade Point Average calculation</li>
+        <li>Cumulative Grade Point Average calculation</li>
+        <li>Subject-wise grade analysis</li>
+        <li>Semester performance tracking</li>
+        <li>CSV report downloads</li>
+        <li>Academic progress visualization</li>
+    </ul>
+
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.caption("GradePilot | Academic Performance Made Simple")
+
+
+# ==========================================
+# FOOTER
+# ==========================================
+
 st.divider()
-st.header("5. Overall CGPA")
 
-student_records = [
-    item for item in st.session_state.semester_records
-    if item["roll_no"] == roll_no.strip()
-]
-
-if student_records:
-
-    semester_df = pd.DataFrame(student_records)
-
-    semester_df = semester_df.sort_values("semester")
-
-    cgpa = calculate_cgpa(
-        semester_df["sgpa"].tolist(),
-        semester_df["total_credits"].tolist()
-    )
-
-    col1, col2 = st.columns(2)
-
-    col1.metric("Overall CGPA", f"{cgpa:.2f}/10")
-
-    col2.metric(
-        "Completed Semesters",
-        len(semester_df)
-    )
-
-    st.subheader("Semester-wise Performance")
-
-    st.dataframe(
-        semester_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.subheader("SGPA Performance Chart")
-
-    st.bar_chart(
-        semester_df.set_index("semester")["sgpa"]
-    )
-
-    st.download_button(
-        "Download CGPA Report",
-        data=semester_df.to_csv(index=False).encode("utf-8"),
-        file_name="cgpa_report.csv",
-        mime="text/csv"
-    )
-
-else:
-    st.info(
-        "Calculate at least one semester SGPA "
-        "to view your overall CGPA."
-    )
-
-
-# Footer
-st.divider()
-
-st.caption(
-    "ABES Smart CGPA & SGPA Calculator | "
-    "Python | NumPy | Pandas | Streamlit"
-)
-
-st.caption(
-    "Educational estimates only. "
-    "Not an official ABES/AKTU result system."
+st.markdown(
+    """
+    <div style="text-align:center; color:#64748b; padding:15px;">
+        <b>GradePilot</b> | Academic Performance Made Simple 🎓
+        <br>
+        <small>Built with Python, Pandas, NumPy and Streamlit</small>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
