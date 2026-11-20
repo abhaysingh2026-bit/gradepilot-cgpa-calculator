@@ -1,0 +1,4 @@
+roll_no,student_name,branch,academic_year,semester,subject_code,subject_name,course_type,credits,internal_marks,internal_max,external_marks,external_max,total_marks,maximum_marks,percentage,grade,grade_point
+2,Priya Verma,CSE AI-ML,2026-27,1,BCS101,Mathematics,Theory,4,14,20,58,80,72,100,72,A,8
+2,Priya Verma,CSE AI-ML,2026-27,1,BCS102,Physics,Theory,3,15,20,52,80,67,100,67,B+,7
+2,Priya Verma,CSE AI-ML,2026-27,1,BCS103,Programming,Theory,4,16,20,64,80,80,100,80,A+,9
